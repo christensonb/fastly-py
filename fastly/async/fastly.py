@@ -1,22 +1,18 @@
+import asyncio
 import os
-import sys
 
-if sys.version_info[0] == 2:
-    pass
-else:
-    pass
-
-from .connection import *
+from fastly.errors import *
 from .auth import *
-from .errors import *
+from .connection import Connection
 from .models import *
 
 
 class API(object):
     def __init__(self, host=os.environ.get('FASTLY_HOST', 'api.fastly.com'),
                  secure=os.environ.get('FASTLY_SECURE', True), port=None,
-                 root='', timeout=5.0, key=None):
-        self.conn = Connection(host, secure, port, root, timeout)
+                 root='', timeout=5.0, key=None, session=None, loop=None):
+        self.conn = Connection(host, secure, port, root, timeout,
+                               session=session, loop=loop)
 
         if key:
             self.authenticate_by_key(key)
@@ -24,9 +20,9 @@ class API(object):
     def authenticate_by_key(self, key):
         self.conn.authenticator = KeyAuthenticator(key)
 
-    def authenticate_by_password(self, login, password):
-        self.conn.authenticator = SessionAuthenticator(self.conn, login,
-                                                       password)
+    async def authenticate_by_password(self, login, password):
+        self.conn.authenticator = await create_session_authenticator(
+            self.conn, login, password)
 
     def deauthenticate(self):
         self.conn.authenticator = None
@@ -56,31 +52,31 @@ class API(object):
         return Header.find(self.conn, service_id=service_id, version=version,
                            name=name)
 
-    def purge_url(self, host, path, soft=False):
+    async def purge_url(self, host, path, soft=False):
         headers = {'Host': host}
         if soft:
             headers['Fastly-Soft-Purge'] = '1'
 
-        resp, data = self.conn.request('PURGE', path, headers=headers)
+        resp, data = await self.conn.request('PURGE', path, headers=headers)
         return resp.status == 200
 
-    def soft_purge_url(self, host, path):
-        return self.purge_url(host, path, True)
+    async def soft_purge_url(self, host, path):
+        return await self.purge_url(host, path, True)
 
-    def purge_service(self, service, soft=False):
+    async def purge_service(self, service, soft=False):
         headers = {}
         if soft:
             headers['Fastly-Soft-Purge'] = '1'
 
-        resp, data = self.conn.request('POST',
-                                       '/service/%s/purge_all' % service,
-                                       headers=headers)
+        resp, data = await self.conn.request('POST',
+                                             '/service/%s/purge_all' % service,
+                                             headers=headers)
         return resp.status == 200
 
-    def soft_purge_service(self, service):
-        return self.purge_service(service, True)
+    async def soft_purge_service(self, service):
+        return await self.purge_service(service, True)
 
-    def purge_key(self, service, key, soft=False):
+    async def purge_key(self, service, key, soft=False):
         if type(self.conn.authenticator) is not KeyAuthenticator:
             raise AuthenticationError("This request requires an API key")
 
@@ -88,14 +84,25 @@ class API(object):
         if soft:
             headers['Fastly-Soft-Purge'] = '1'
 
-        resp, data = self.conn.request('POST',
-                                       '/service/%s/purge/%s' % (service, key),
-                                       headers=headers)
+        resp, data = await self.conn.request('POST', '/service/%s/purge/%s' % (
+            service, key), headers=headers)
         return resp.status == 200
 
-    def soft_purge_key(self, service, key):
-        return self.purge_key(service, key, True)
+    async def soft_purge_key(self, service, key):
+        return await self.purge_key(service, key, True)
 
     def close(self):
         if self.conn:
             self.conn.close()
+
+    @asyncio.coroutine
+    def __aenter__(self):
+        return self
+
+    @asyncio.coroutine
+    def __aexit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def __enter__(self):
+        # warning use async with instead
+        return self

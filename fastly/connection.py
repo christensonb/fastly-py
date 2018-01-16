@@ -4,12 +4,12 @@ import json
 import sys
 
 if sys.version_info[0] == 2:
-    import httplib
+    from httplib import HTTPSConnection, HTTPConnection
 else:
-    import http.client as httplib
+    from http.client import HTTPSConnection, HTTPConnection
 
 from ._version import __version__
-from .errors import *
+from .errors import assert_response_status
 
 
 class Connection(object):
@@ -33,12 +33,11 @@ class Connection(object):
         if not self.port:
             self.port = 443 if self.secure else 80
 
-        if self.secure:
-            self.http_conn = httplib.HTTPSConnection(self.host, self.port,
-                                                     timeout=self.timeout)
-        else:
-            self.http_conn = httplib.HTTPConnection(self.host, self.port,
-                                                    timeout=self.timeout)
+        connection = HTTPSConnection if self.secure else HTTPConnection
+        if not isinstance(self.http_conn, connection):
+            self.close()
+            self.http_conn = connection(self.host, self.port,
+                                        timeout=self.timeout)
 
         if self.authenticator:
             self.authenticator.add_auth(headers)
@@ -51,13 +50,9 @@ class Connection(object):
         except ValueError:
             data = body
 
-        if response.status == 401:
-            raise AuthenticationError()
-        elif response.status == 500:
-            raise InternalServerError()
-        elif response.status == 400:
-            raise BadRequestError(body)
-        elif response.status == 404:
-            raise NotFoundError()
-
+        assert_response_status(response.status, body)
         return (response, data)
+
+    def close(self):
+        if self.http_conn:
+            self.http_conn.close()

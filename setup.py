@@ -1,6 +1,12 @@
+import sys
 from setuptools import setup
 
 exec (open('fastly/_version.py').read())
+
+install_requires = [] if sys.version_info[0] == 2 else [
+    'asyncio',
+    'aiohttp',
+]
 
 setup(
     name="fastly",
@@ -19,6 +25,7 @@ setup(
         "Development Status :: 3 - Alpha",
         "Topic :: Utilities"
     ],
+    install_requires=install_requires,
     scripts=[
         "bin/purge_service",
         "bin/purge_key",
